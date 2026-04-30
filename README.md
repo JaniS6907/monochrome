@@ -1,3 +1,4 @@
+ 
  <p align="center">
   <a href="https://monochrome.tf">
     <img src="https://github.com/monochrome-music/monochrome/blob/main/public/assets/512.png?raw=true" alt="Monochrome Logo" width="150px">
@@ -12,7 +13,7 @@
 
 <p align="center">
   <a href="https://monochrome.tf">Website</a> -
-  <a href="https://ko-fi.com/monochromemusic">Donate</a> -
+  <a href="https://ko-fi.com/monochrometf">Donate</a> -
   <a href="#features">Features</a> -
   <a href="#usage">Usage</a> -
   <a href="#self-hosting">Self-Hosting</a> -
@@ -35,21 +36,11 @@
 
 ## What is Monochrome?
 
-**Monochrome** is an open-source, privacy-respecting, ad-free [TIDAL](https://tidal.com) web UI, built on top of Hi-Fi. It provides a beautiful, minimalist interface for streaming high-quality music without the clutter of traditional streaming platforms.
+**Monochrome** is an open-source, privacy-respecting, ad-free [TIDAL](https://tidal.com) web UI, built on top of tidal API + Q-DL. It provides a beautiful, minimalist interface for streaming high-quality music without the clutter of traditional streaming platforms.
 
-<p align="center">
-  <a href="https://monochrome.tf/album/90502209">
-    <img width="2559" height="1439" alt="Image of 'NASIR' By Nas On Monochrome" src="https://i.samidy.xyz/NASIR.png"  alt="Monochrome UI" width="800">
-  </a>
-</p>
+[![Monochrome UI: NASIR by Nas](https://i.samidy.xyz/NASIR.png)](https://monochrome.tf/album/90502209)
 
-<p align="center">
-  <a href="https://monochrome.tf/album/413189044">
-    <img width="2559" height="1439" alt="Image of 'Jump Out' By Osamason On Monochrome" src="https://i.samidy.xyz/jumpout.png"  alt="Monochrome UI" width="800">
-  </a>
-</p>
-
----
+## [![Monochrome UI: Jump Out by Osamason](https://i.samidy.xyz/jumpout.png)](https://monochrome.tf/album/413189044)
 
 ## Features
 
@@ -63,7 +54,6 @@
 
 - Dark, minimalist interface optimized for focus
 - Animated Album Covers For Supported Albums
-- High-quality Music Videos
 - Customizable themes & Community Theme Store
 - Accurate and unique audio visualizer
 - Offline-capable Progressive Web App (PWA)
@@ -127,7 +117,7 @@ We had to heavily customize the authentication system and write several custom s
 
 ```bash
 git clone https://github.com/monochrome-music/monochrome.git
-cd monochrome
+cd monochrome/docker
 docker compose up -d
 ```
 
