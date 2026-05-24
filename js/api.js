@@ -37,6 +37,13 @@ import {
 
 export const DASH_MANIFEST_UNAVAILABLE_CODE = 'DASH_MANIFEST_UNAVAILABLE';
 export { resolveDownloadTotalBytes };
+let lastAudioSourceMissingNotifyAt = 0;
+function notifyAudioSourceMissing() {
+    const now = Date.now();
+    if (now - lastAudioSourceMissingNotifyAt < 3000) return;
+    lastAudioSourceMissingNotifyAt = now;
+    import('./downloads.js').then((m) => m.showNotification('Could not find Audio Source')).catch(() => {});
+}
 
 export class LosslessAPI {
     constructor(settings) {
@@ -1196,15 +1203,14 @@ export class LosslessAPI {
             name: rawArtist.name || 'Unknown Artist',
         };
 
-        const entries = [];
-
         const albumMap = new Map();
         const trackMap = new Map();
         const videoMap = new Map();
 
-        const isTrack = (v) => v?.id && v.duration;
-        const isAlbum = (v) => v?.id && 'numberOfTracks' in v;
-        const isVideo = (v) => v?.id && !!v.type?.toLowerCase().includes('video');
+        const isTrack = (v) => v?.id && (v.duration || v.trackNumber != null || v.type === 'track');
+        const isAlbum = (v) =>
+            v?.id && ('numberOfTracks' in v || 'numberOfItems' in v || v.type === 'album' || v.type === 'ALBUM');
+        const isVideo = (v) => v?.id && (!!v.type?.toLowerCase().includes('video') || v.type === 'VIDEO');
 
         const scan = (value, visited) => {
             if (!value || typeof value !== 'object' || visited.has(value)) return;
@@ -1216,25 +1222,47 @@ export class LosslessAPI {
             }
 
             const item = value.item || value;
-            if (isAlbum(item)) albumMap.set(item.id, this.prepareAlbum(item));
-            if (isTrack(item) && !isAlbum(item) && !isVideo(item)) {
+            const type = (item.type || '').toLowerCase();
+
+            if (isAlbum(item) || type === 'album') albumMap.set(item.id, this.prepareAlbum(item));
+            if ((isTrack(item) || type === 'track') && !isAlbum(item) && !isVideo(item)) {
                 trackMap.set(item.id, this.prepareTrack(item));
             }
-            if (isVideo(item)) videoMap.set(item.id, this.prepareVideo(item));
+            if (isVideo(item) || type === 'video') videoMap.set(item.id, this.prepareVideo(item));
 
             Object.values(value).forEach((nested) => scan(nested, visited));
         };
 
         const visited = new Set();
-        entries.forEach((entry) => scan(entry, visited));
         scan(primaryData, visited);
+
+        if (albumMap.size === 0) {
+            try {
+                if (import.meta.env.DEV) {
+                    console.log('No albums in primary response, trying fallback fetch');
+                }
+                const albumsResponse = await this.fetchWithRetry(`/artist/?f=${artistId}&skip_tracks=true`);
+                const albumsData = await albumsResponse.json();
+                scan(albumsData, visited);
+            } catch (e) {
+                console.warn('Fallback album fetch failed:', e);
+            }
+        }
 
         const matchesArtistId = (item) => {
             const candidateIds = [
+                item.artistId,
+                item.artist_id,
                 item.artist?.id,
                 ...(Array.isArray(item.artists) ? item.artists.map((a) => a.id) : []),
+                ...(Array.isArray(item.artistRoles) ? item.artistRoles.map((r) => r.artist?.id) : []),
             ].filter((id) => id != null);
-            return candidateIds.some((id) => Number(id) === Number(artistId));
+
+            if (item.artist && (typeof item.artist === 'number' || typeof item.artist === 'string')) {
+                candidateIds.push(item.artist);
+            }
+
+            return candidateIds.some((id) => Number(id) === Number(artist.id) || Number(id) === Number(artistId));
         };
 
         if (!options.lightweight) {
@@ -1699,6 +1727,30 @@ export class LosslessAPI {
         }
     }
 
+    async getTrackFromDevMode(id, quality = 'LOSSLESS') {
+        const devBaseUrl = devModeSettings.getUrl().replace(/\/+$/, '');
+        const requestedQuality = normalizeQualityToken(quality) || quality || 'LOSSLESS';
+        const params = new URLSearchParams({
+            id: String(id),
+            quality: requestedQuality,
+            adaptive: 'false',
+        });
+        for (const format of this.getTrackManifestFormats(quality)) {
+            params.append('formats', format);
+        }
+
+        const url = `${devBaseUrl}/trackManifests/?${params.toString()}`;
+        if (import.meta.env.DEV) {
+            console.log('[dev-mode]', url);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Dev mode request failed: ${response.status} ${response.statusText}`);
+        }
+        const jsonResponse = await response.json();
+        return this.parseTrackLookup(await this.normalizeTrackManifestResponse(jsonResponse, quality));
+    }
+
     async getTrack(id, quality = 'LOSSLESS', { adaptive = false } = {}) {
         const cacheKey = `${id}_${quality}_${adaptive ? 'adaptive' : 'fixed'}`;
         const cached = await this.cache.get('track', cacheKey);
@@ -1797,64 +1849,61 @@ export class LosslessAPI {
         return null;
     }
 
-    async getStreamUrl(id, quality = 'LOSSLESS', download = false) {
+    async getStreamUrl(id, quality = 'LOSSLESS') {
         const cacheKey = `stream_info_${id}_${quality}`;
 
         if (this.streamCache.has(cacheKey)) {
             return this.streamCache.get(cacheKey);
         }
 
-        let streamUrl;
-        let manifestRgInfo = null;
-
-        try {
-            const track = await this.getTrackMetadata(id);
-            if (track && track.isrc) {
-                const qobuzResult = await this.getQobuzStreamUrl(track.isrc, quality);
-                if (qobuzResult && qobuzResult.url) {
-                    const result = {
-                        url: qobuzResult.url,
-                        rgInfo: qobuzResult.rgInfo || {
-                            trackReplayGain: 0,
-                            trackPeakAmplitude: 1,
-                            albumReplayGain: 0,
-                            albumPeakAmplitude: 1,
-                        },
-                    };
-                    this.streamCache.set(cacheKey, result);
-                    return result;
-                }
-            }
-        } catch (e) {
-            console.warn('ISRC matching failed:', e);
-        }
-
-        const lookup = await this.getTrack(id, quality, { adaptive: this.shouldUseAdaptiveTrackManifest(download) });
-
-        if (lookup.originalTrackUrl) {
-            streamUrl = lookup.originalTrackUrl;
-        } else {
-            const manifest = lookup.info?.manifest;
-            if (manifest) {
-                streamUrl = this.extractStreamUrlFromManifest(manifest);
+        if (devModeSettings.isEnabled()) {
+            const lookup = await this.getTrackFromDevMode(id, quality);
+            let streamUrl;
+            if (lookup.originalTrackUrl) {
+                streamUrl = lookup.originalTrackUrl;
+            } else if (lookup.info?.manifest) {
+                streamUrl = this.extractStreamUrlFromManifest(lookup.info.manifest);
             }
             if (!streamUrl) {
-                throw new Error('Could not resolve stream URL');
+                throw new Error('Could not resolve stream URL from dev mode');
             }
-        }
-
-        if (lookup.info) {
-            manifestRgInfo = {
-                trackReplayGain: lookup.info.trackReplayGain || lookup.info.replayGain,
-                trackPeakAmplitude: lookup.info.trackPeakAmplitude || lookup.info.peakAmplitude,
-                albumReplayGain: lookup.info.albumReplayGain,
-                albumPeakAmplitude: lookup.info.albumPeakAmplitude,
+            const result = {
+                url: streamUrl,
+                rgInfo: lookup.info
+                    ? {
+                          trackReplayGain: lookup.info.trackReplayGain || lookup.info.replayGain,
+                          trackPeakAmplitude: lookup.info.trackPeakAmplitude || lookup.info.peakAmplitude,
+                          albumReplayGain: lookup.info.albumReplayGain,
+                          albumPeakAmplitude: lookup.info.albumPeakAmplitude,
+                      }
+                    : null,
             };
+            this.streamCache.set(cacheKey, result);
+            return result;
         }
 
-        const result = { url: streamUrl, rgInfo: manifestRgInfo };
-        this.streamCache.set(cacheKey, result);
+        const track = await this.getTrackMetadata(id);
+        if (!track?.isrc) {
+            notifyAudioSourceMissing();
+            throw new Error('Could not resolve stream URL: track has no ISRC for Qobuz lookup');
+        }
 
+        const qobuzResult = await this.getQobuzStreamUrl(track.isrc, quality);
+        if (!qobuzResult?.url) {
+            notifyAudioSourceMissing();
+            throw new Error('Could not resolve stream URL from Qobuz');
+        }
+
+        const result = {
+            url: qobuzResult.url,
+            rgInfo: qobuzResult.rgInfo || {
+                trackReplayGain: 0,
+                trackPeakAmplitude: 1,
+                albumReplayGain: 0,
+                albumPeakAmplitude: 1,
+            },
+        };
+        this.streamCache.set(cacheKey, result);
         return result;
     }
 
@@ -1919,33 +1968,33 @@ export class LosslessAPI {
         let qobuzRgInfo = null;
         let qobuzStreamUrl = null;
 
-        if (!isVideo && track.isrc) {
-            try {
-                const qobuzResult = await this.getQobuzStreamUrl(track.isrc, cleanQuality);
-                if (qobuzResult && qobuzResult.url) {
-                    qobuzStreamUrl = qobuzResult.url;
-                    qobuzRgInfo = qobuzResult.rgInfo;
-                    lookup = {
-                        info: {
-                            audioQuality: cleanQuality,
-                            trackReplayGain: qobuzRgInfo?.trackReplayGain ?? 0,
-                            trackPeakAmplitude: qobuzRgInfo?.trackPeakAmplitude ?? 1,
-                            albumReplayGain: qobuzRgInfo?.albumReplayGain ?? 0,
-                            albumPeakAmplitude: qobuzRgInfo?.albumPeakAmplitude ?? 1,
-                        },
-                    };
-                }
-            } catch (e) {
-                console.warn('ISRC matching failed in enrichTrack:', e);
+        if (isVideo) {
+            lookup = await this.getVideo(id);
+        } else if (devModeSettings.isEnabled()) {
+            lookup = new PlaybackInfo(await this.getTrackFromDevMode(id, cleanQuality));
+        } else {
+            if (!track?.isrc) {
+                notifyAudioSourceMissing();
+                throw new Error('Cannot resolve audio stream: track has no ISRC for Qobuz lookup');
             }
-        }
 
-        if (!lookup) {
-            if (isVideo) {
-                lookup = await this.getVideo(id);
-            } else {
-                lookup = new PlaybackInfo(await this.getTrack(id, cleanQuality));
+            const qobuzResult = await this.getQobuzStreamUrl(track.isrc, cleanQuality);
+            if (!qobuzResult?.url) {
+                notifyAudioSourceMissing();
+                throw new Error('Could not resolve audio stream from Qobuz');
             }
+
+            qobuzStreamUrl = qobuzResult.url;
+            qobuzRgInfo = qobuzResult.rgInfo;
+            lookup = {
+                info: {
+                    audioQuality: cleanQuality,
+                    trackReplayGain: qobuzRgInfo?.trackReplayGain ?? 0,
+                    trackPeakAmplitude: qobuzRgInfo?.trackPeakAmplitude ?? 1,
+                    albumReplayGain: qobuzRgInfo?.albumReplayGain ?? 0,
+                    albumPeakAmplitude: qobuzRgInfo?.albumPeakAmplitude ?? 1,
+                },
+            };
         }
 
         const enrichedTrack = { ...this.prepareTrack(track) };

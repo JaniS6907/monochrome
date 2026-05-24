@@ -1882,6 +1882,7 @@
                     <div class="home-header-tabs">
                         <button class="home-tab active" data-tab="for-you">Home</button>
                         <button class="home-tab" data-tab="explore">Hot & New</button>
+                        <button class="home-tab" data-tab="aoty">AOTY</button>
                     </div>
 
                     <div id="home-view-for-you" class="home-view active">
@@ -2026,6 +2027,10 @@
                             <div class="card-grid" id="explore-grid"></div>
                         </div>
                     </div>
+
+                    <div id="home-view-aoty" class="home-view" style="display: none">
+                        <div id="aoty-content"></div>
+                    </div>
                 </div>
 
                 <div id="page-parties" class="page">
@@ -2035,9 +2040,12 @@
                             Listen to music together with your friends in real-time. Host controls the music, everyone
                             enjoys it.
                         </p>
-                        <div id="parties-auth-required" style="display: none">
-                            <p style="margin-bottom: 1rem">You need an account to host a listening party.</p>
-                            <button id="parties-login-btn" class="btn-primary">Sign In / Sign Up</button>
+                        <div id="parties-auth-required" style="display: none; margin-bottom: 2rem">
+                            <p style="margin-bottom: 1rem; color: var(--muted-foreground); font-size: 0.9rem">
+                                Hosting as a guest works, but signing in lets your party persist across devices and
+                                gives you a real profile in the chat.
+                            </p>
+                            <button id="parties-login-btn" class="btn-secondary">Sign In / Sign Up</button>
                         </div>
                         <div id="parties-host-controls" style="display: none">
                             <input
@@ -2116,8 +2124,20 @@
                                             display: flex;
                                             flex-direction: column;
                                             gap: 0.5rem;
+                                            min-height: 0;
                                         "
                                     ></div>
+                                    <div
+                                        id="party-typing-indicator"
+                                        class="party-typing-indicator"
+                                        aria-live="polite"
+                                        hidden
+                                    >
+                                        <span class="party-typing-dots" aria-hidden="true"
+                                            ><span></span><span></span><span></span
+                                        ></span>
+                                        <span class="party-typing-text"></span>
+                                    </div>
                                     <div
                                         class="chat-input-container"
                                         style="
@@ -5924,7 +5944,10 @@
                         <p style="text-align: center; color: grey">
                             made with ‪‪❤︎‬ by
                             <a href="https://prigoana.com/" style="text-decoration: underline">Edideaur</a> &
-                            <a href="https://samidy.com" style="text-decoration: underline">Samidy</a>
+                            <a href="https://samidy.com" style="text-decoration: underline">Samidy</a>.
+                        </p>
+                        <p style="text-align: center; color: grey">
+                            We also take paid code commissions (we don't work for free)! Contact any of us for details.
                         </p>
                         <br />
                         <h3 style="text-align: center">Contributors List:</h3>
@@ -6192,6 +6215,15 @@
                 </div>
                 <div class="volume-controls">
                     <div class="player-actions-row">
+                        <button
+                            id="now-playing-party-btn"
+                            class="now-playing-party-btn"
+                            title="Open listening party"
+                            aria-label="Open listening party"
+                            style="display: none"
+                        >
+                            <use svg="!lucide/users.svg" size="20" />
+                        </button>
                         <button
                             id="now-playing-like-btn"
                             class="like-btn"
