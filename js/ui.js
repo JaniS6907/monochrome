@@ -35,7 +35,8 @@ import { db } from './db.js';
 import { getVibrantColorFromImage } from './vibrant-color.js';
 import { syncManager } from './accounts/pocketbase.js';
 import { authManager } from './accounts/auth.js';
-import { partyManager } from './listening-party.js';
+import { AUTH_BASE_URL } from './accounts/config.js';
+import { areListeningPartiesDisabled, partyManager } from './listening-party.js';
 import { Visualizer } from './visualizer.js';
 import { audioContextManager } from './audio-context.js';
 import { navigate } from './router.js';
@@ -488,6 +489,7 @@ export class UIRenderer {
         useTrackNumber = false,
         inlineLike = false
     ) {
+        if (contentBlockingSettings?.isHardcodedBlockedTrack(track)) return '';
         const isUnavailable = track.isUnavailable;
         const isBlocked = contentBlockingSettings?.shouldHideTrack(track);
         const isVideo = track.type === 'video';
@@ -826,6 +828,7 @@ export class UIRenderer {
     }
 
     createAlbumCardHTML(album) {
+        if (contentBlockingSettings?.isHardcodedBlockedAlbum(album)) return '';
         const explicitBadge = hasExplicitContent(album) ? this.createExplicitBadge() : '';
         const qualityBadge = createQualityBadgeHTML(album);
         const isBlocked = contentBlockingSettings?.shouldHideAlbum(album);
@@ -922,6 +925,7 @@ export class UIRenderer {
     }
 
     createArtistCardHTML(artist) {
+        if (contentBlockingSettings?.isHardcodedBlockedArtist(artist?.id)) return '';
         const isCompact = cardSettings.isCompactArtist();
         const isBlocked = contentBlockingSettings?.shouldHideArtist(artist);
 
@@ -2457,13 +2461,52 @@ export class UIRenderer {
         const authRequired = document.getElementById('parties-auth-required');
         const hostControls = document.getElementById('parties-host-controls');
         const loginBtn = document.getElementById('parties-login-btn');
+        const disabledNotice = document.getElementById('parties-disabled-notice');
+        const activeParty = document.getElementById('parties-active-party');
+        const returnBtn = document.getElementById('parties-return-btn');
 
-        hostControls.style.display = 'block';
+        const authServerAvailable = await this.checkPartiesServerAvailable();
+        if (areListeningPartiesDisabled() || !authServerAvailable) {
+            if (disabledNotice) disabledNotice.style.display = 'block';
+            if (hostControls) hostControls.style.display = 'none';
+            if (authRequired) authRequired.style.display = 'none';
+            if (activeParty) activeParty.style.display = 'none';
+            return;
+        }
+
+        if (disabledNotice) disabledNotice.style.display = 'none';
+        if (partyManager.currentParty?.id) {
+            if (activeParty) activeParty.style.display = 'block';
+            if (hostControls) hostControls.style.display = 'none';
+            if (authRequired) authRequired.style.display = 'none';
+            if (returnBtn) returnBtn.onclick = () => navigate(`/party/${partyManager.currentParty.id}`);
+            return;
+        }
+
+        if (activeParty) activeParty.style.display = 'none';
+        if (hostControls) hostControls.style.display = 'block';
         if (authManager.user) {
-            authRequired.style.display = 'none';
+            if (authRequired) authRequired.style.display = 'none';
         } else {
-            authRequired.style.display = 'block';
-            loginBtn.onclick = () => navigate('/account');
+            if (authRequired) authRequired.style.display = 'block';
+            if (loginBtn) loginBtn.onclick = () => navigate('/account');
+        }
+    }
+
+    async checkPartiesServerAvailable() {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        try {
+            const response = await fetch(`${AUTH_BASE_URL}/health`, {
+                credentials: 'include',
+                cache: 'no-store',
+                signal: controller.signal,
+            });
+            return response.ok;
+        } catch (_e) {
+            return false;
+        } finally {
+            clearTimeout(timeout);
         }
     }
 
@@ -5506,6 +5549,35 @@ export class UIRenderer {
     }
 
     async renderArtistPage(artistId, provider = null) {
+        if (contentBlockingSettings?.isHardcodedBlockedArtist(artistId)) {
+            await this.showPage('artist');
+            this.currentArtistId = artistId;
+            const nameEl = document.getElementById('artist-detail-name');
+            const metaEl = document.getElementById('artist-detail-meta');
+            const imageEl = document.getElementById('artist-detail-image');
+            if (nameEl) nameEl.textContent = '';
+            if (metaEl) metaEl.textContent = '';
+            if (imageEl) {
+                imageEl.src = '';
+                imageEl.style.backgroundColor = 'var(--muted)';
+            }
+            [
+                'artist-detail-bio',
+                'artist-detail-tracks',
+                'artist-detail-albums',
+                'artist-detail-eps',
+                'artist-detail-similar',
+                'artist-detail-in-library',
+            ].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = '';
+            });
+            ['artist-section-eps', 'artist-section-similar', 'artist-section-in-library'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            return;
+        }
         await this.showPage('artist');
         this.currentArtistId = artistId;
 
