@@ -856,14 +856,6 @@ export async function initializeSettings(scrobbler, player, api, ui) {
         });
     }
 
-    const amazonConverterBaseUrlInput = document.getElementById('amazon-music-converter-base-url');
-    if (amazonConverterBaseUrlInput) {
-        amazonConverterBaseUrlInput.value = amazonMusicSettings.getConverterBaseUrl();
-        amazonConverterBaseUrlInput.addEventListener('change', (e) => {
-            amazonMusicSettings.setConverterBaseUrl(e.target.value.trim());
-        });
-    }
-
     const amazonTurnstileSiteKeyInput = document.getElementById('amazon-music-turnstile-site-key');
     if (amazonTurnstileSiteKeyInput) {
         amazonTurnstileSiteKeyInput.value = amazonMusicSettings.getTurnstileSiteKey();
@@ -959,7 +951,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             const m = text.match(/(\d+)\s*kbps/i);
             return m ? parseInt(m[1], 10) : Infinity;
         };
-        const categoryOrder = ['Lossless', 'AAC', 'MP3', 'OGG'];
+        const categoryOrder = ['Lossless', 'AAC', 'MP3', 'OGG', 'Opus'];
         allOptions.sort((a, b) => {
             if (a.category == b.category && a.category === 'Lossless') return 0; // Preserve original order for lossless options
             const ai = categoryOrder.indexOf(a.category);
